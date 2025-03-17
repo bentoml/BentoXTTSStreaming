@@ -12,11 +12,20 @@ from fastapi.responses import StreamingResponse
 from streaming_utils import StreamingInputs, predict_streaming_generator
 
 
-BENTO_MODEL_TAG = "coqui--xtts-v2"
+MODEL_ID = "coqui/XTTS-v2"
 
-app = FastAPI()
+runtime_image = bentoml.images.PythonImage(
+    python_version="3.11",
+    base_image="pytorch/pytorch:2.4.1-cuda12.4-cudnn9-devel",
+).requirements_file("requirements.txt")
+
+streaming_app = FastAPI()
+
 
 @bentoml.service(
+    name="bentoxtts-service",
+    image=runtime_image,
+    envs=[{"name": "COQUI_TOS_AGREED", "value": "1"}],
     traffic={
         "timeout": 300,
         "concurrency": 3,
@@ -27,10 +36,10 @@ app = FastAPI()
     },
     workers=3,
 )
-@bentoml.mount_asgi_app(app, path="/tts")
+@bentoml.asgi_app(streaming_app, path="/tts")
 class XTTSStreaming:
 
-    bento_model_ref = bentoml.models.BentoModel(BENTO_MODEL_TAG)
+    hf_model = bentoml.models.HuggingFaceModel(MODEL_ID)
 
     def __init__(self) -> None:
         import torch
@@ -41,11 +50,11 @@ class XTTSStreaming:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         config = XttsConfig()
-        config.load_json(self.bento_model_ref.path_of("config.json"))
+        config.load_json(os.path.join(self.hf_model, "config.json"))
         self.model = Xtts.init_from_config(config)
         self.model.load_checkpoint(
             config,
-            checkpoint_dir=self.bento_model_ref.path,
+            checkpoint_dir=self.hf_model,
             eval=True,
             use_deepspeed=True if self.device == "cuda" else False
         )
@@ -59,7 +68,7 @@ class XTTSStreaming:
         self.speaker_embedding = _t[1]
 
         
-    @app.post("/stream")
+    @streaming_app.post("/stream")
     def tts_stream(self, inp: StreamingInputs):
         gen = predict_streaming_generator(
             model=self.model,
