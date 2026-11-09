@@ -1,5 +1,5 @@
 bentoml>=1.4.3,<2
 deepspeed==0.16.4
 fastapi==0.115.11
-transformers==4.49.0
+transformers==5.10.1
 coqui-tts==0.26.0
